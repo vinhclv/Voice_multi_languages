@@ -1,0 +1,7 @@
+pywinauto
+watchdog
+pyperclip
+mutagen
+pydub
+audioop-lts
+

@@ -10,10 +10,11 @@ import audio_post_processor
 import auto_video_pipeline
 import traceback
 import json
+import pandas as pd
 INPUT_DIR = r"\\Synology-new\data share\Dat\TheNews_Raw\DowloadsTelegram"
 OUTPUT_DIR = r"\\Synology-new\data share\Dat\TheNews_Raw\Output"
 
-APP_TITLE = "Dgt Auto TTS Subtitles Clone Voice 5.10"
+APP_TITLE = "Dgt Auto TTS Subtitles Clone Voice 5.11"
 
 LANG_MAP_FILE = "lang_map.json"
 
@@ -85,20 +86,32 @@ def move_resources_to_output(base_name, current_project_dir, output_dir):
         if len(remaining_subtitles) == 0:
             print(f"\n🎉 Dự án {project_name} đã đọc xong TẤT CẢ ngôn ngữ! Tiến hành chốt hạ...")
             
-            # BÂY GIỜ mới được dời file Video gốc và SRT gốc sang Output
+            # 1. DỜI CÁC FILE GỐC (MP4, SRT, XLSX)
             orig_mp4 = os.path.join(current_project_dir, f"{project_name}.mp4")
             orig_srt = os.path.join(current_project_dir, f"{project_name}.srt")
+            orig_xlsx = os.path.join(current_project_dir, f"{project_name}.xlsx")
+            
             if os.path.exists(orig_mp4): move_with_retry(orig_mp4, os.path.join(project_out_dir, f"{project_name}.mp4"))
             if os.path.exists(orig_srt): move_with_retry(orig_srt, os.path.join(project_out_dir, f"{project_name}.srt"))
+            if os.path.exists(orig_xlsx): move_with_retry(orig_xlsx, os.path.join(project_out_dir, f"{project_name}.xlsx"))
             
-            # Xóa cờ báo hiệu (Tắt điện trước khi ra khỏi phòng)
-            trigger_file = os.path.join(current_project_dir, "done_translation.txt")
-            if os.path.exists(trigger_file): os.remove(trigger_file)
-            done_translation.txt
-            # Xóa thư mục Input (lúc này chắc chắn đã trống rỗng)
+            # 2. QUÉT VÀ DỜI TOÀN BỘ FILE ẢNH PNG
+            for file_in_dir in os.listdir(current_project_dir):
+                if file_in_dir.lower().endswith(".png"):
+                    src_png = os.path.join(current_project_dir, file_in_dir)
+                    dst_png = os.path.join(project_out_dir, file_in_dir)
+                    move_with_retry(src_png, dst_png)
+            
+            # 3. XÓA CÁC FILE CỜ BÁO HIỆU (Để rmdir không bị lỗi thư mục không trống)
+            trigger_trans = os.path.join(current_project_dir, "done_translation.txt")
+            trigger_meta = os.path.join(current_project_dir, "done_metadata.txt")
+            if os.path.exists(trigger_trans): os.remove(trigger_trans)
+            if os.path.exists(trigger_meta): os.remove(trigger_meta)
+            
+            # 4. Xóa thư mục Input (lúc này chắc chắn đã trống rỗng)
             for _ in range(3):
                 try:
-                    os.rmdir(current_project_dir)
+                    shutil.rmtree(current_project_dir)
                     print(f"🗑️ Đã xóa sạch sẽ thư mục Input: {project_name}")
                     break
                 except:
@@ -144,6 +157,7 @@ def convert_srt_to_txt(srt_filepath, txt_filepath):
     except Exception as e:
         print(f"❌ Lỗi chuyển đổi SRT: {e}")
 
+
 def process_tts_tool(file_path):
     filename = os.path.basename(file_path)
     base_name = os.path.splitext(filename)[0] 
@@ -155,9 +169,9 @@ def process_tts_tool(file_path):
         lang_code = parts[-1].lower() if len(parts) > 1 else "vi"
 
         CURRENT_LANG_MAP = load_lang_map()
-        target_lang = CURRENT_LANG_MAP.get(lang_code, "vn") 
+        target_voice = CURRENT_LANG_MAP.get(lang_code, "vi") 
         
-        print(f"\n==> Xử lý TTS: {filename} | Ngôn ngữ: {target_lang}")
+        print(f"\n==> Xử lý TTS: {filename} | Ngôn ngữ: {lang_code}")
         
         app = Application(backend="win32").connect(title=APP_TITLE)
         main_window = app.window(title=APP_TITLE)
@@ -177,7 +191,7 @@ def process_tts_tool(file_path):
         file_dialog.type_keys("{ENTER}")
 
         # Chọn Voice Clone
-        if lang_code in LANG_MAP:
+        if lang_code in CURRENT_LANG_MAP:
             time.sleep(1)
             main_window.child_window(auto_id="btnVoiceClone").click_input()
             time.sleep(2) 
@@ -197,7 +211,7 @@ def process_tts_tool(file_path):
                 
                 current_name = current_val.split('_')[0].lower() if '_' in current_val else current_val.lower()
                 
-                if target_lang.lower() == current_name:
+                if target_voice.lower() == current_name:
                     found = True
                     break
                     
@@ -215,7 +229,7 @@ def process_tts_tool(file_path):
         btn_start = main_window.child_window(auto_id="btnStart")
         btn_start.set_focus()
         btn_start.type_keys("{SPACE}")
-        print(f"⏳ Tool đang xử lý TTS cho voice: {target_lang}... Vui lòng đợi.")
+        print(f"⏳ Tool đang xử lý TTS cho voice: {target_voice}... Vui lòng đợi.")
 
         time.sleep(5) 
         btn_start.wait('enabled', timeout=1200) 
@@ -252,12 +266,14 @@ def continuous_scanner():
             for folder_name in project_folders:
                 folder_path = os.path.join(INPUT_DIR, folder_name)
 
-                # --- LOGIC MỚI: KIỂM TRA FILE TRIGGER ---
-                trigger_file = os.path.join(folder_path, "done_translation.txt")
-                if not os.path.exists(trigger_file):
-                    # Nếu chưa có file done_translation.txt thì bỏ qua folder này, chưa xử lý
+                # --- LOGIC MỚI: KIỂM TRA ĐỦ 2 FILE TRIGGER ---
+                trigger_trans = os.path.join(folder_path, "done_translation.txt")
+                trigger_meta = os.path.join(folder_path, "done_metadata.txt")
+                
+                # Nếu thiếu 1 trong 2 file, sẽ bỏ qua và chờ vòng quét sau
+                if not (os.path.exists(trigger_trans) and os.path.exists(trigger_meta)):
                     continue
-                # ----------------------------------------
+                
                 srt_files = [f for f in os.listdir(folder_path) if f.lower().endswith(".srt")]
                 
                 for filename in srt_files:
@@ -275,6 +291,64 @@ def continuous_scanner():
         
         time.sleep(2)
 
+def update_excel(project_out_dir, folder_name):
+    """Đọc file Excel cũ, đắp thêm cột và đường dẫn tuyệt đối chuẩn xác theo từng dòng"""
+    excel_path = os.path.join(project_out_dir, f"{folder_name}.xlsx")
+    
+    if not os.path.exists(excel_path):
+        print(f"   ⚠️ Không tìm thấy file {folder_name}.xlsx để cập nhật.")
+        return False
+
+    try:
+        print("   📊 Đang cấu hình file Excel chuẩn form DHB...")
+        df = pd.read_excel(excel_path)
+        
+        # Bắt buộc file Excel phải có cột "Ngôn ngữ" từ trước
+        if "Ngôn ngữ" not in df.columns:
+            print("   ❌ Lỗi: File Excel đầu vào không có cột 'Ngôn ngữ' để đối chiếu!")
+            return False
+
+        paths_video = []
+        paths_thumb = []
+        tai_khoan = []
+        
+        # Quét TỪNG DÒNG trong Excel để lấy đúng file Video khớp với dòng đó
+        for index, row in df.iterrows():
+            lang = str(row["Ngôn ngữ"]).strip() # Lấy ngôn ngữ của dòng hiện tại (vd: 'vi')
+            
+            # Tự động suy ra tên file Video và Thumbnail dựa trên ngôn ngữ đó
+            video_name = f"{folder_name}_{lang}_DUBBED.mp4"
+            thumb_name = f"{folder_name}_{lang}.png"
+            
+            video_full_path = os.path.abspath(os.path.join(project_out_dir, video_name))
+            thumb_full_path = os.path.abspath(os.path.join(project_out_dir, thumb_name))
+            
+            # Kiểm tra xem video đó có thực sự tồn tại trên ổ cứng không
+            if not os.path.exists(video_full_path):
+                print(f"   ⚠️ Cảnh báo: Không tìm thấy video {video_name} trên ổ cứng!")
+            
+            # Nạp vào mảng (Đảm bảo thứ tự mảng này khớp 100% với thứ tự dòng trong Excel)
+            paths_video.append(video_full_path)
+            paths_thumb.append(thumb_full_path)
+            tai_khoan.append(lang)
+            
+        # Đắp dữ liệu mới vào Excel
+        df["Ảnh thu nhỏ"] = paths_thumb
+        df["Trẻ em"] = "Không"
+        df["Riêng tư"] = "Công khai"
+        df["Đặt lịch"] = "None"
+        df["Tài khoản"] = tai_khoan  # Tài khoản khớp tuyệt đối với ngôn ngữ của dòng
+        df["Video"] = paths_video
+        # TUYỆT ĐỐI KHÔNG ghi đè cột "Ngôn ngữ" nữa vì nó đã chuẩn rồi
+        
+        # Lưu đè lại file
+        df.to_excel(excel_path, index=False)
+        print(f"   ✅ Đã chốt form Excel thành công, khớp 100% dữ liệu, sẵn sàng lên mâm!")
+        return True
+            
+    except Exception as e:
+        print(f"   ❌ Lỗi khi cập nhật Excel DHB: {e}")
+        return False
 
 def output_scanner():
     print(f"👁️ Hệ thống giám sát Output đã kích hoạt trên: {OUTPUT_DIR}")
@@ -288,28 +362,9 @@ def output_scanner():
                     marker_100_percent = os.path.join(project_out_dir, "_HOAN_THANH_100.txt")
                     marker_done_post = os.path.join(project_out_dir, "_DA_XU_LY_OUTPUT_XONG.txt")
                     
+                    # ĐIỀU KIỆN TIÊN QUYẾT: Đã đủ nguyên liệu (Cờ 100) VÀ chưa làm Hậu kỳ
                     if os.path.exists(marker_100_percent) and not os.path.exists(marker_done_post):
                         
-                        # --- TRẠM KIỂM LÂM: ÉP PHẢI ĐỦ FILE MỚI ĐƯỢC HẬU KỲ ---
-                        # 1. Lấy danh sách toàn bộ các file .srt dịch (bỏ qua file gốc và fixed)
-                        target_srts = [f for f in os.listdir(project_out_dir) 
-                                       if f.endswith(".srt") 
-                                       and not f.endswith("_fixed.srt")
-                                       and f != f"{folder_name}.srt"]
-                        
-                        # 2. Kiểm tra xem mỗi file srt đã có thư mục Audio tương ứng chưa
-                        all_folders_ready = True
-                        for srt in target_srts:
-                            base = os.path.splitext(srt)[0]
-                            if not os.path.exists(os.path.join(project_out_dir, base)):
-                                all_folders_ready = False
-                                break
-                        
-                        if not all_folders_ready:
-                            # Đang kẹt thì bỏ qua vòng lặp này, chờ vòng sau quét lại
-                            continue 
-                        # -----------------------------------------------------
-
                         print(f"\n🎯 PHÁT HIỆN DỰ ÁN SẴN SÀNG HẬU KỲ: {folder_name}")
                         success = audio_post_processor.run_post_processing_for_project(project_out_dir)
 
@@ -318,22 +373,19 @@ def output_scanner():
                             print("🎬 Bắt đầu quá trình ghép Audio vào Video...")
                             video_success = auto_video_pipeline.run_video_sync_pipeline(project_out_dir, folder_name)
                             
-                            # Nếu nấu ăn thất bại (chưa có video DUBBED) thì nghỉ, không dọn rác để còn sửa lỗi
+                            # NẾU THẤT BẠI: Dừng lại, không dọn rác, không cắm cờ!
                             if not video_success:
-                                print("🛑 Hậu kỳ Video gặp lỗi, dừng việc dọn dẹp!")
-                                continue
-
-                            # 2. RỬA BÁT VÀ QUÉT NHÀ 
+                                print(f"🛑 Hậu kỳ Video gặp lỗi cho dự án {folder_name}. Dừng việc dọn dẹp và cắm cờ!")
+                                continue 
+                            
+                            # 2. RỬA BÁT VÀ QUÉT NHÀ (Chỉ chạy khi có Video)
                             print("🧹 Đang tiến hành dọn dẹp nguyên liệu thô...")
                             
-                            # =========================================================
-                            # BƯỚC 4 (MỚI): ĐẠI TRÙNG TU (Chỉ giữ TXT, DUBBED và SRT)
-                            # =========================================================
                             for item in os.listdir(project_out_dir):
                                 item_path = os.path.join(project_out_dir, item)
                                 
                                 if os.path.isfile(item_path):
-                                    if item.lower().endswith(".txt") or item.endswith("_DUBBED.mp4") or item.endswith("_fixed.srt") or item.endswith(".mp3"):
+                                    if item.lower().endswith((".txt", ".png", ".xlsx")) or item == f"{folder_name}.srt" or item.endswith("_DUBBED.mp4"):
                                         continue
                                     else:
                                         try:
@@ -346,19 +398,26 @@ def output_scanner():
                                         shutil.rmtree(item_path) 
                                         print(f"   🗑️ Đã xóa thư mục: {item}")
                                     except Exception: pass
-                        # ----------------------------------------
-
-                        with open(marker_done_post, "w", encoding="utf-8") as f:
-                            status = "Thành công" if success else "Có lỗi trong quá trình"
-                            f.write(f"Trạng thái Hậu kỳ: {status}")
                             
-                        print(f"🏁 ĐÃ ĐÓNG DẤU HẬU KỲ XONG CHO: {folder_name}")
+                            # 3. CẬP NHẬT EXCEL
+                            excel_success = update_excel(project_out_dir, folder_name)
+                            if not excel_success:
+                                print(f"🛑 Cập nhật Excel thất bại cho {folder_name}. Bỏ qua việc cắm cờ!")
+                                continue 
+                                    
+                            # 4. ĐÓNG DẤU HOÀN THÀNH 
+                            with open(marker_done_post, "w", encoding="utf-8") as f:
+                                f.write("Trạng thái Hậu kỳ: ok")
+                                
+                            print(f"🏁 ĐÃ ĐÓNG DẤU HẬU KỲ XONG CHO: {folder_name}")
+
+                        else:
+                            print(f"⚠️ Quá trình tạo Audio thất bại cho {folder_name}. Chờ vòng sau xử lý lại.")
                         
         except Exception as e:
             print(f"⚠️ Lỗi khi quét Output: {e}")
             traceback.print_exc()
         time.sleep(2)
-
 if __name__ == "__main__":
     if not os.path.exists(OUTPUT_DIR): 
         os.makedirs(OUTPUT_DIR)

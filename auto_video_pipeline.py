@@ -196,7 +196,7 @@ def run_video_sync_pipeline(project_out_dir, base_name, max_workers=6):
                         final_dubbed_vid
                     ]
                     
-                    merge_result = subprocess.run(merge_cmd, capture_output=True, text=True, startupinfo=startupinfo)
+                    merge_result = subprocess.run(merge_cmd, capture_output=True, text=True, startupinfo=startupinfo, timeout=1800)
                     if merge_result.returncode != 0:
                         print(f"❌ LỖI FFMPEG BƯỚC GHÉP ÂM THANH/SUB:\n{merge_result.stderr}")
                         continue

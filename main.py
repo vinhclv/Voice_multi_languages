@@ -14,7 +14,7 @@ import pandas as pd
 INPUT_DIR = r"\\Synology-new\data share\Dat\TheNews_Raw\DowloadsTelegram"
 OUTPUT_DIR = r"\\Synology-new\data share\Dat\TheNews_Raw\Output"
 
-APP_TITLE = "Dgt Auto TTS Subtitles Clone Voice 5.11"
+APP_TITLE = r"Dgt Auto TTS Subtitles Clone Voice.*"
 
 LANG_MAP_FILE = "lang_map.json"
 
@@ -173,8 +173,8 @@ def process_tts_tool(file_path):
         
         print(f"\n==> Xử lý TTS: {filename} | Ngôn ngữ: {lang_code}")
         
-        app = Application(backend="win32").connect(title=APP_TITLE)
-        main_window = app.window(title=APP_TITLE)
+        app = Application(backend="win32").connect(title_re=APP_TITLE)
+        main_window = app.window(title_re=APP_TITLE)
         main_window.set_focus()
 
         # Import File
@@ -374,9 +374,35 @@ def output_scanner():
                             video_success = auto_video_pipeline.run_video_sync_pipeline(project_out_dir, folder_name)
                             
                             # NẾU THẤT BẠI: Dừng lại, không dọn rác, không cắm cờ!
-                            if not video_success:
-                                print(f"🛑 Hậu kỳ Video gặp lỗi cho dự án {folder_name}. Dừng việc dọn dẹp và cắm cờ!")
-                                continue 
+                            if not video_success: #Rollback
+                                print(f"🛑 Hậu kỳ Video gặp lỗi cho dự án {folder_name}.")
+                                print("🧹 Đang dọn dẹp các tàn dư video dở dang để vòng sau làm lại từ đầu...")
+                                
+                                base_name = folder_name
+                                for item in os.listdir(project_out_dir):
+                                    item_path = os.path.join(project_out_dir, item)
+                                    
+                                    # 1. Dọn dẹp các Thư mục rác sinh ra lúc làm video
+                                    if os.path.isdir(item_path):
+                                        if item == f"{base_name}_Splitted_Goc" or f"{base_name}_Stretched_" in item:
+                                            try:
+                                                shutil.rmtree(item_path)
+                                                print(f"   🗑️ Xóa thư mục dở dang: {item}")
+                                            except Exception as e: 
+                                                pass
+                                                
+                                    # 2. Dọn dẹp các File rác/File đích dở dang
+                                    elif os.path.isfile(item_path):
+                                        # Xóa temp_en.mp4, temp_vi.mp4... hoặc file Dubbed đã xuất xong 1 phần
+                                        if (item.startswith("temp_") and item.endswith(".mp4")) or item.endswith("_DUBBED.mp4"):
+                                            try:
+                                                os.remove(item_path)
+                                                print(f"   🗑️ Xóa file video dở dang: {item}")
+                                            except Exception as e: 
+                                                pass
+                                                
+                                print(f"🔄 Đã khôi phục {folder_name} về trạng thái sẵn sàng. Chờ vòng lặp sau thử lại!")
+                                continue # Bỏ qua các bước rửa bát và cắm cờ bên dưới
                             
                             # 2. RỬA BÁT VÀ QUÉT NHÀ (Chỉ chạy khi có Video)
                             print("🧹 Đang tiến hành dọn dẹp nguyên liệu thô...")
@@ -418,6 +444,7 @@ def output_scanner():
             print(f"⚠️ Lỗi khi quét Output: {e}")
             traceback.print_exc()
         time.sleep(2)
+
 if __name__ == "__main__":
     if not os.path.exists(OUTPUT_DIR): 
         os.makedirs(OUTPUT_DIR)

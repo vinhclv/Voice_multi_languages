@@ -173,26 +173,33 @@ def run_post_processing_for_project(project_dir):
 
     all_success = True
 
+    # ==========================================
     # --- XỬ LÝ FILE GỐC ---
+    # ==========================================
     folder_audio_goc = os.path.join(project_dir, project_name)
     if os.path.exists(folder_audio_goc):
-        print(f"\n--- Đang xử lý ngôn ngữ GỐC: {project_name} ---")
         goc_srt_da_fix = os.path.join(project_dir, f"{project_name}_fixed.srt")
         goc_output_fixed = os.path.join(project_dir, f"{project_name}_audio_fixed")
         goc_final_mp3 = os.path.join(project_dir, f"{project_name}_final.mp3")
         
-        success_goc = sync_srt_timings(srt_goc_chuan, srt_goc_chuan, folder_audio_goc, goc_srt_da_fix)
-        if success_goc:
-            # Gán kết quả thực tế của việc gộp audio vào all_success
-            if not process_and_merge(folder_audio_goc, goc_srt_da_fix, goc_output_fixed, goc_final_mp3):
-                all_success = False
+        # KIỂM TRA: Nếu cả file Audio và Sub đã làm xong từ trước -> Bỏ qua
+        if os.path.exists(goc_final_mp3) and os.path.exists(goc_srt_da_fix):
+            print(f"\n--- ⏩ Đã có sẵn Audio GỐC ({project_name}), bỏ qua bước xử lý ---")
         else:
-            all_success = False
+            print(f"\n--- ⏳ Đang xử lý ngôn ngữ GỐC: {project_name} ---")
+            success_goc = sync_srt_timings(srt_goc_chuan, srt_goc_chuan, folder_audio_goc, goc_srt_da_fix)
+            if success_goc:
+                if not process_and_merge(folder_audio_goc, goc_srt_da_fix, goc_output_fixed, goc_final_mp3):
+                    all_success = False
+            else:
+                all_success = False
     else:
         print(f"⚠️ Không tìm thấy thư mục audio gốc '{project_name}'.")
-        all_success = False # Đánh dấu lỗi nếu thiếu nguyên liệu gốc
+        all_success = False
 
+    # ==========================================
     # --- XỬ LÝ FILE DỊCH ---
+    # ==========================================
     target_srts = [f for f in os.listdir(project_dir) 
                    if f.endswith(".srt") 
                    and f != f"{project_name}.srt" 
@@ -208,14 +215,19 @@ def run_post_processing_for_project(project_dir):
 
         if not os.path.exists(folder_audio_dich):
             print(f"⚠️ Bỏ qua {base_name}: Không tìm thấy thư mục audio thô.")
-            all_success = False # Quan trọng: Thiếu ngôn ngữ dịch cũng coi là chưa xong dự án
+            all_success = False 
             continue
             
-        print(f"\n--- Đang xử lý ngôn ngữ dịch: {base_name} ---")
-        if sync_srt_timings(srt_goc_chuan, srt_can_fix, folder_audio_dich, srt_da_fix):
-            if not process_and_merge(folder_audio_dich, srt_da_fix, folder_audio_fixed, file_audio_tong):
-                all_success = False
+        # KIỂM TRA: Nếu file dịch này đã làm xong từ lần trước -> Bỏ qua
+        if os.path.exists(file_audio_tong) and os.path.exists(srt_da_fix):
+            print(f"\n--- ⏩ Đã có sẵn Audio dịch: {base_name}, bỏ qua bước xử lý ---")
         else:
-            all_success = False
+            print(f"\n--- ⏳ Đang xử lý ngôn ngữ dịch: {base_name} ---")
+            if sync_srt_timings(srt_goc_chuan, srt_can_fix, folder_audio_dich, srt_da_fix):
+                if not process_and_merge(folder_audio_dich, srt_da_fix, folder_audio_fixed, file_audio_tong):
+                    all_success = False
+            else:
+                all_success = False
 
     return all_success
+    

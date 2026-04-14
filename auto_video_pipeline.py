@@ -41,7 +41,7 @@ def wait_for_file_ready(file_path, wait_time=3, timeout=300):
 # =========================================================
 # QUY TRÌNH CHÍNH
 # =========================================================
-def run_video_sync_pipeline(project_out_dir, base_name, max_workers=6):
+def run_video_sync_pipeline(project_out_dir, base_name, max_workers=6, generate_sub=True):
     try:
         orig_vid = os.path.join(project_out_dir, f"{base_name}.mp4")
         orig_srt = os.path.join(project_out_dir, f"{base_name}.srt")
@@ -178,25 +178,38 @@ def run_video_sync_pipeline(project_out_dir, base_name, max_workers=6):
                 final_dubbed_vid = os.path.join(project_out_dir, f"{base_name}_{lang_code}_DUBBED.mp4")
 
                 if os.path.exists(temp_video) and os.path.exists(audio_file):
-                    print(f"   🎬 Đang Mix Audio và Hardcode Subtitles (Có thể mất vài phút)...")
-                    srt_ff_path = fixed_srt_path.replace('\\', '/').replace(':', '\\:')
+                    msg = "và Hardcode Subtitles" if generate_sub else "(Không ghép Sub)"
+                    print(f"   🎬 Đang Mix Audio {msg} (Có thể mất vài phút)...")
                     
+                    # 1. Khởi tạo mảng lệnh cơ bản
                     merge_cmd = [
                         PATHS["ffmpeg"], "-y",
                         "-i", temp_video,
                         "-i", audio_file,
                         "-map", "0:v:0",
-                        "-map", "1:a:0",
-                        "-vf", f"subtitles='{srt_ff_path}'",
+                        "-map", "1:a:0"
+                    ]
+                    
+                    # 2. KIỂM TRA ĐIỀU KIỆN: Nếu Giao diện chọn CÓ -> Nhét thêm filter Subtitle vào mảng
+                    if generate_sub:
+                        srt_ff_path = fixed_srt_path.replace('\\', '/').replace(':', '\\:')
+                        merge_cmd.extend(["-vf", f"subtitles='{srt_ff_path}'"])
+                    
+                    # 3. Nối các cấu hình chốt hạ vào đuôi mảng
+                    merge_cmd.extend([
                         "-c:v", "libx264",
                         "-preset", "fast", 
                         "-c:a", "aac",
                         "-b:a", "192k",
                         "-shortest",
                         final_dubbed_vid
-                    ]
+                    ])
                     
+                    # Chạy lệnh
+                    startupinfo = subprocess.STARTUPINFO()
+                    startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
                     merge_result = subprocess.run(merge_cmd, capture_output=True, text=True, startupinfo=startupinfo, timeout=1800)
+                    
                     if merge_result.returncode != 0:
                         print(f"❌ LỖI FFMPEG BƯỚC GHÉP ÂM THANH/SUB:\n{merge_result.stderr}")
                         continue
